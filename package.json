@@ -1,4 +1,5 @@
 {
+  "name": "github.com/burlap101/aoc2024-typescript",
   "scripts": {
     "exec": "node -r @swc-node/register",
     "test": "jest"
