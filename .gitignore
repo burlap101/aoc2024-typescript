@@ -1,2 +1,8 @@
 /node_modules/
 
+# Ignore js compiled files in the day dirs
+/day*/*.js
+
+# Ignore compiled utils
+/utils.js
+
