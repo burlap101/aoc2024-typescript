@@ -1,5 +1,4 @@
 import { getLines } from "../utils";
-import { strict as assert } from "node:assert";
 
 /**
  * Represents a position on the map
@@ -25,10 +24,11 @@ export enum Direction {
  */
 export class SituationMap {
 	map: string[];
+	temporaryObstacle?: Coordinate;
 	private _guardStartPoint?: Coordinate;
 
 	constructor(lines: string[]) {
-		this.map = lines;
+		this.map = [...lines];
 	}
 
 	get guardStartPoint(): Coordinate {
@@ -52,6 +52,36 @@ export class SituationMap {
 		// put this here to shutup a linting error
 		return this._guardStartPoint;
 	}
+
+	/**
+	 * Add an obstacle to the map
+	 * @param i row
+	 * @param j col
+	 */
+	addTemporaryObstacle({ i, j }: Coordinate) {
+		const line = this.map[i];
+		let newLine = line.slice(0, j);
+		newLine += "#";
+		newLine += line.slice(j + 1);
+		this.map[i] = newLine;
+		this.temporaryObstacle = { i, j };
+	}
+
+	/**
+	 * Remove an obstacle from the map
+	 * If temporary obstacle isn't set then doesn't do anything
+	 */
+	removeTemporaryObstacle(): void {
+		if (this.temporaryObstacle === undefined) {
+			return;
+		}
+		const { i, j } = this.temporaryObstacle;
+		const line = this.map[i];
+		let newLine = line.slice(0, j);
+		newLine += ".";
+		newLine += line.slice(j + 1);
+		this.map[i] = newLine;
+	}
 }
 
 /**
@@ -60,13 +90,17 @@ export class SituationMap {
  * @property totalMoves the points visited by the guard
  * @prop direction the direction the guard is pointing
  * @prop smap situation map relating to the guard's path
+ * @prop visited set of all visited points
  */
 export class Guard {
 	curPosition: Coordinate;
-	totalMoves: number;
 	direction: Direction;
 	smap: SituationMap;
-	visited: Record<string, true>;
+	visited: Record<string, Direction[]>;
+	firstObstacleHit?: {
+		at: Coordinate;
+		direction: Direction;
+	};
 
 	/**
 	 * Initialise parameters for new object
@@ -80,8 +114,6 @@ export class Guard {
 			j: startPoint.j,
 		};
 		this.visited = {};
-		this.addVisit(startPoint.i, startPoint.j);
-		this.totalMoves = 1;
 		this.direction = Direction.Up;
 	}
 
@@ -98,12 +130,12 @@ export class Guard {
 						this.direction = Direction.Right;
 						break;
 					}
-					this.addVisit(i, j);
 					if (i === 0) {
 						this.curPosition.i = 0;
+						this.addVisit();
 						break;
 					}
-					this.totalMoves++;
+					this.addVisit(i, j);
 				}
 				break;
 			}
@@ -115,12 +147,12 @@ export class Guard {
 						this.direction = Direction.Left;
 						break;
 					}
-					this.addVisit(i, j);
 					if (i === this.smap.map.length - 1) {
 						this.curPosition = { i, j };
+						this.addVisit();
 						break;
 					}
-					this.totalMoves++;
+					this.addVisit(i, j);
 				}
 				break;
 			}
@@ -132,12 +164,12 @@ export class Guard {
 						this.direction = Direction.Up;
 						break;
 					}
-					this.addVisit(i, j);
 					if (j === 0) {
 						this.curPosition.j = j;
+						this.addVisit();
 						break;
 					}
-					this.totalMoves++;
+					this.addVisit(i, j);
 				}
 				break;
 			}
@@ -149,12 +181,12 @@ export class Guard {
 						this.direction = Direction.Down;
 						break;
 					}
-					this.addVisit(i, j);
 					if (j === this.smap.map[0].length - 1) {
 						this.curPosition.j = j;
+						this.addVisit();
 						break;
 					}
-					this.totalMoves++;
+					this.addVisit(i, j);
 				}
 				break;
 			}
@@ -163,10 +195,14 @@ export class Guard {
 					`Current direction not in those available got; ${this.direction}`,
 				);
 		}
-		// if not at the edge then we reduce the count to avoid double
-		// counting points
-		if (!this.atEdge) {
-			this.totalMoves--;
+
+		// Set the first obstacle hit object
+		if (this.firstObstacleHit === undefined) {
+			const { i, j } = this.curPosition;
+			this.firstObstacleHit = {
+				at: { i, j },
+				direction: this.direction,
+			};
 		}
 	}
 
@@ -180,28 +216,127 @@ export class Guard {
 		return false;
 	}
 
-	addVisit(i: number, j: number) {
-		this.visited[`${i}|${j}`] = true;
+	/**
+	 * Converts Coordinate to a point string
+	 * @param i row
+	 * @param j columnp
+	 * @returns point string
+	 */
+	static pointString({ i, j }: Coordinate) {
+		return `${i}|${j}`;
+	}
+
+	addVisit(i?: number, j?: number) {
+		const pointStr =
+			i && j
+				? Guard.pointString({ i, j })
+				: Guard.pointString(this.curPosition);
+		if (this.visited[pointStr] === undefined) {
+			this.visited[pointStr] = [this.direction];
+			return;
+		}
+		this.visited[pointStr].push(this.direction);
 	}
 
 	get totalDistinctPoints(): number {
-		return Object.keys(this.visited).length
+		return Object.keys(this.visited).length;
+	}
+
+	/**
+	 * Determines if a loop has been performed based on duplicate entries
+	 * within a visited record value array.
+	 */
+	get performedLoop(): boolean {
+		// cover the case of just starting
+		if (Object.keys(this.visited).length <= 1) {
+			return false;
+		}
+		if (this.atEdge) {
+			return false;
+		}
+		for (const pointString in this.visited) {
+			const visited = this.visited[pointString];
+			if (new Set(visited).size !== visited?.length) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	/**
+	 * Takes a point string of form `i|j` and transforms it into a Coordinate
+	 * @param visited point string
+	 * @returns corresponding Coordinate object
+	 */
+	static toCoordinate(visited: string): Coordinate {
+		const snums = visited.split("|", 2);
+		return { i: Number.parseInt(snums[0]), j: Number.parseInt(snums[1]) };
+	}
+
+	resetPosition() {
+		this.curPosition = this.smap.guardStartPoint;
+		this.direction = Direction.Up;
+		this.visited = {};
 	}
 }
 
-/**
- * Performs all necessary operations for part1
- * @param filename file containing original map
- * @returns total visited spots by the guard
- */
-export function part1(filename: string): number {
-	const lines = getLines(filename);
-	const smap = new SituationMap(lines);
-	const guard = new Guard(smap);
+export class Parter {
+	smap: SituationMap;
+	guard: Guard;
+	private _filename: string
 
-	while (!guard.atEdge) {
-		guard.moveToObstruction();
+	constructor(filename: string) {
+		this._filename = filename
+		this.smap = new SituationMap(this.lines);
+		this.guard = new Guard(this.smap);
 	}
 
-	return guard.totalDistinctPoints;
+	get lines(): string[] {
+		return getLines(this._filename);
+	}
+
+	/**
+	 * Performs all necessary operations for part1
+	 * @returns total visited distinct spots by the guard
+	 */
+	part1(): number {
+		const guard = this.guard;
+		guard.visited = {};
+		guard.addVisit(guard.curPosition.i, guard.curPosition.j);
+		while (!guard.atEdge) {
+			guard.moveToObstruction();
+		}
+		return this.guard.totalDistinctPoints;
+	}
+
+	part2(): number {
+		const originalGuard = this.guard;
+		// Ensure part1 has been called already
+		if (originalGuard.totalDistinctPoints <= 1) {
+			this.part1();
+		}
+		let totalLoops = 0;
+
+		for (const spoint in originalGuard.visited) {
+			// Can't put obstacle on the start position
+			if (spoint === Guard.pointString(this.smap.guardStartPoint)) {
+				continue;
+			}
+			const newSmap = new SituationMap(this.lines);
+			const guard = new Guard(newSmap);
+			newSmap.addTemporaryObstacle(Guard.toCoordinate(spoint));
+			while (true) {
+				guard.moveToObstruction();
+				if (guard.atEdge) {
+					break;
+				}
+				if (guard.performedLoop) {
+					totalLoops++;
+					break;
+				}
+			}
+			newSmap.removeTemporaryObstacle();
+		}
+		return totalLoops;
+	}
 }

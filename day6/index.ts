@@ -1,3 +1,5 @@
-import { part1 } from "./lib";
+import { Parter } from "./lib";
 
-console.log("Part1:", part1("day6/input.txt"));
+const parter = new Parter("day6/input.txt");
+console.log("Part1:", parter.part1());
+console.log("Part2:", parter.part2());

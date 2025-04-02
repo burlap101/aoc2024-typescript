@@ -33,7 +33,6 @@ describe("testing lib.ts", () => {
 		];
 		const result = lib.breakDownLinePart2(input);
 		const matched = [...result];
-		console.log(matched);
 		for (let i = 0; i < Math.max(expected.length, matched.length); i++) {
 			expect(matched[i].toString()).toEqual(expected[i].toString());
 		}
