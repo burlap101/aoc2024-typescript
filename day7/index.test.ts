@@ -48,7 +48,11 @@ describe("Test lib", () => {
 			expect(lib.parseLine(test[0])).toEqual(test[1]);
 		}
 	});
+	const parts = lib.parts("day7/test.txt");
 	test("part1 - returns expected result for test input", () => {
-		expect(lib.part1("day7/test.txt")).toBe(3749);
+		expect(parts.part1()).toBe(3749);
+	});
+	test("part2 - returns expected result for test input", () => {
+		expect(parts.part2()).toBe(11387);
 	});
 });
